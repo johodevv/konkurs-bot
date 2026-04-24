@@ -45,30 +45,26 @@ async def get_jild_url():
     
     if not user_bot.is_connected: await user_bot.start()
     peers = []
-    for (cid,) in rows:
+    for (cid, link) in rows:
         try:
-            p = await user_bot.resolve_peer(cid)
-            peers.append(p)
+            target = link if link.startswith("@") else cid
+            chat = await user_bot.get_chat(target)
+            peers.append(await user_bot.resolve_peer(chat.id))
         except: continue
     
     if not peers: return None
-    f_id = 205 
+    f_id = 200
     try:
-        await user_bot.invoke(functions.messages.UpdateDialogFilter(id=f_id, filter=raw_types.DialogFilter(id=f_id, title="🎁 Konkurs", include_peers=peers, pinned_peers=[], exclude_peers=[])))
+        await user_bot.invoke(functions.messages.UpdateDialogFilter(id=f_id, filter=raw_types.DialogFilter(id=f_id, title="❤️ Konkurs", include_peers=peers, pinned_peers=[], exclude_peers=[])))
         invites = await user_bot.invoke(functions.chatlists.GetExportedInvites(chatlist=raw_types.InputChatlistDialogFilter(filter_id=f_id)))
         if invites.invites: return invites.invites[0].url
-        invite = await user_bot.invoke(functions.chatlists.ExportChatlistInvite(chatlist=raw_types.InputChatlistDialogFilter(filter_id=f_id), title="Konkurs Jildi", peers=peers))
+        invite = await user_bot.invoke(functions.chatlists.ExportChatlistInvite(chatlist=raw_types.InputChatlistDialogFilter(filter_id=f_id), title="Konkurs", peers=peers))
         return invite.url
     except: return None
 
 # --- HANDLERLAR ---
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
-    conn = sqlite3.connect('konkurs_bot.db')
-    conn.execute('INSERT OR IGNORE INTO users VALUES (?)', (message.from_user.id,))
-    conn.commit()
-    conn.close()
-
     if not await check_sub(message.from_user.id):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Kanal 1", url="https://t.me/ortiqboyovichch")],
@@ -78,6 +74,10 @@ async def start_cmd(message: types.Message):
         await message.answer("👋 Botdan foydalanish uchun obuna bo'ling!", reply_markup=kb)
         return
     
+    conn = sqlite3.connect('konkurs_bot.db')
+    conn.execute('INSERT OR IGNORE INTO users VALUES (?)', (message.from_user.id,))
+    conn.commit()
+    conn.close()
     await message.answer("✅ Salom! Kanal linkini yuboring (Masalan: @username):")
 
 @dp.callback_query(F.data == "check")
@@ -94,27 +94,32 @@ async def admin_cmd(message: types.Message):
         u_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
         c_count = conn.execute('SELECT COUNT(*) FROM channels').fetchone()[0]
         conn.close()
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚀 Jildni tarqatish", callback_data="send_all")]])
-        await message.answer(f"📊 Statistika:\n👤 Userlar: {u_count}\n📢 Kanallar: {c_count}", reply_markup=kb)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚀 Tarqatish", callback_data="send_all")]])
+        await message.answer(f"📊 Userlar: {u_count}\n📢 Kanallar: {c_count}", reply_markup=kb)
 
 @dp.callback_query(F.data == "send_all")
-async def send_all_call(callback: types.CallbackQuery):
-    await callback.message.edit_text("⏳ Jild tayyorlanmoqda...")
+async def send_call(callback: types.CallbackQuery):
+    await callback.message.edit_text("⏳ Jild tayyorlanmoqda, kuting...")
     link = await get_jild_url()
     
     conn = sqlite3.connect('konkurs_bot.db')
-    users = conn.execute('SELECT user_id FROM users').fetchall()
+    chans = conn.execute('SELECT chat_id FROM channels').fetchall()
     conn.close()
+
+    if not chans:
+        await callback.message.answer("❌ Bazada kanal yo'q!")
+        return
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📂 Jildga qo'shilish", url=link or "https://t.me/")]])
     success = 0
-    for (uid,) in users:
+    for (cid,) in chans:
         try:
-            await bot.send_photo(chat_id=uid, photo=PREMIUM_IMAGE, caption="🎁 **DIQQAT KONKURS!**\n\nPastdagi jildga obuna bo'ling!", reply_markup=kb)
+            # ORIGINAL MANTIQ: Kanallarga rasm bilan tarqatish
+            await bot.send_photo(chat_id=cid, photo=PREMIUM_IMAGE, caption="🎁 **DIQQAT KONKURS!**\n\nPastdagi jildga obuna bo'ling!", reply_markup=kb)
             success += 1
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.5)
         except: continue
-    await callback.message.answer(f"✅ Xabar {success} ta foydalanuvchiga yuborildi!")
+    await callback.message.answer(f"✅ Xabar {success} ta kanalga rasm bilan yuborildi!")
 
 @dp.message(F.text.startswith("@"))
 async def add_link(message: types.Message):
@@ -138,9 +143,10 @@ async def main():
     init_db()
     logging.basicConfig(level=logging.INFO)
     if not user_bot.is_connected: await user_bot.start()
+    # CONFLICTNI OLDINI OLISH UCHUN:
     await bot.delete_webhook(drop_pending_updates=True)
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, skip_updates=True)
     finally:
         await user_bot.stop()
 
