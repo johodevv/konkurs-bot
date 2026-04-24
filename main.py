@@ -15,14 +15,13 @@ SESSION_STRING = "AgGyXtMABg1dy66Kd9DjaNIUSds6CTQomsUhCmXVn0-fseieC4qzyP2Oq5EVAP
 ADMIN_ID = 8430652870
 
 REQUIRED_CHANNELS = ["@ortiqboyovichch", "@jildgaqoshil"]
-# Rasm URL manzilini tekshirib ko'ring, u ishchi holatda bo'lishi kerak
 PREMIUM_IMAGE = "https://clm.sh/s/167b0b72-f851-4043-8557-01004a806954"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_bot = Client("my_account", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
-# --- BAZA ---
+# --- BAZA FUNKSIYALARI ---
 def init_db():
     conn = sqlite3.connect('konkurs_bot.db')
     conn.execute('CREATE TABLE IF NOT EXISTS channels (chat_id INTEGER PRIMARY KEY, title TEXT, link TEXT)')
@@ -48,13 +47,9 @@ async def get_jild_url():
     if not user_bot.is_connected: await user_bot.start()
     for cid, link in rows:
         try:
-            # Linkni to'g'ri formatda ekanligini tekshirish
-            target = link if link.startswith("@") else cid
-            chat = await user_bot.get_chat(target)
+            chat = await user_bot.get_chat(link)
             peers.append(await user_bot.resolve_peer(chat.id))
-        except Exception as e:
-            logging.error(f"Peer resolve xatosi: {e}")
-            continue
+        except: continue
     
     if not peers: return None
     f_id = 200
@@ -64,11 +59,9 @@ async def get_jild_url():
         if invites.invites: return invites.invites[0].url
         invite = await user_bot.invoke(functions.chatlists.ExportChatlistInvite(chatlist=raw_types.InputChatlistDialogFilter(filter_id=f_id), title="Konkurs", peers=peers))
         return invite.url
-    except Exception as e:
-        logging.error(f"Jild yaratishda xato: {e}")
-        return None
+    except: return None
 
-# --- HANDLERLAR ---
+# --- ASOSIY HANDLERLAR ---
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     if not await check_sub(message.from_user.id):
@@ -109,6 +102,7 @@ async def send_call(callback: types.CallbackQuery):
     link = await get_jild_url()
     
     conn = sqlite3.connect('konkurs_bot.db')
+    # Barcha qo'shilgan kanallarni olish
     chans = conn.execute('SELECT chat_id FROM channels').fetchall()
     conn.close()
 
@@ -120,14 +114,13 @@ async def send_call(callback: types.CallbackQuery):
     success = 0
     for (cid,) in chans:
         try:
-            # Xabar yuborish qismi (Avvalgi ishlaydigan format)
-            await bot.send_photo(chat_id=cid, photo=PREMIUM_IMAGE, caption="🎁 PREMIUM KONKURS!\n\nPastdagi jildga obuna bo'ling!", reply_markup=kb)
+            # Kanalga rasm va jild tugmasini yuborish
+            await bot.send_photo(chat_id=cid, photo=PREMIUM_IMAGE, caption="🎁 DIQQAT KONKURS!\n\nPastdagi jildga obuna bo'ling!", reply_markup=kb)
             success += 1
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            logging.error(f"Yuborishda xato ({cid}): {e}")
-            continue
-    await callback.message.answer(f"✅ Xabar {success} ta foydalanuvchiga yuborildi!")
+            await asyncio.sleep(0.3)
+        except: continue
+    
+    await callback.message.answer(f"✅ Xabar {success} ta kanalga rasm bilan yuborildi!")
 
 @dp.message(F.text.startswith("@"))
 async def add_link(message: types.Message):
