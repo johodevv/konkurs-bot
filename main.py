@@ -1,7 +1,7 @@
 import asyncio
 import sqlite3
 import logging
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types , F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client
