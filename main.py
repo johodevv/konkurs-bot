@@ -1,29 +1,14 @@
 import asyncio
 import sqlite3
 import logging
+import os
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ParseMode
 from pyrogram import Client
 from pyrogram.raw import functions, types as raw_types
 from aiohttp import web
-
-# Render uchun kichik port ochib berish
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 10000) # Render kutadigan port
-    await site.start()
-
-# main() funksiyang ichiga:
-async def main():
-    await start_web_server() # Buni qo'shish kerak
-    # ... qolgan bot kodlari
 
 # --- SOZMALAR ---
 BOT_TOKEN = "8589756374:AAGsylGrZ8hQxHg9GIo6P3ptInruTd_pMpg"
@@ -38,6 +23,22 @@ user_bot = Client("my_account", api_id=API_ID, api_hash=API_HASH, session_string
 
 admin_states = {}
 
+# --- RENDER PORTINI BAND QILISH (O'CHIB QOLMASLIGI UCHUN) ---
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render avtomatik beradigan PORT yoki 10000-portda ishlaydi
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Web server {port}-portda ishga tushdi.")
+
+# --- BAZA BILAN ISHLASH ---
 def init_db():
     conn = sqlite3.connect('konkurs_bot.db')
     conn.execute('CREATE TABLE IF NOT EXISTS channels (chat_id INTEGER PRIMARY KEY, title TEXT, link TEXT)')
@@ -73,6 +74,7 @@ async def get_folder_link():
         return invite.url
     except: return None
 
+# --- HANDLERLAR ---
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     conn = sqlite3.connect('konkurs_bot.db')
@@ -94,8 +96,8 @@ async def admin_panel(message: types.Message):
             [InlineKeyboardButton(text="🔄 Statistikani yangilash", callback_data="refresh_stats")]
         ])
         
-        text = f"📊 **Statistika**\n\n👤 Userlar: `{user_count}`\n📢 Kanallar: `{channel_count}`\n\nReklama tarqatish uchun tugmani bosing:"
-        await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        text = f"📊 <b>Statistika</b>\n\n👤 Userlar: <code>{user_count}</code>\n📢 Kanallar: <code>{channel_count}</code>"
+        await message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "start_ads")
 async def start_ads_handler(callback: types.CallbackQuery):
@@ -104,9 +106,9 @@ async def start_ads_handler(callback: types.CallbackQuery):
 
 @dp.message(F.from_user.id == ADMIN_ID)
 async def handle_admin_input(message: types.Message):
-    # 1. Reklama tarqatish holati
+    # 1. Reklama tarqatish
     if admin_states.get(message.from_user.id) == "waiting_post":
-        status_msg = await message.answer("⏳ Jild havolasi olinmoqda va tarqatilmoqda...")
+        status_msg = await message.answer("⏳ Jild havolasi olinmoqda...")
         url = await get_folder_link()
         
         if not url:
@@ -116,26 +118,31 @@ async def handle_admin_input(message: types.Message):
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📂 Jildga qo'shilish", url=url)]])
         
         conn = sqlite3.connect('konkurs_bot.db')
-        channels = conn.execute('SELECT chat_id FROM channels').fetchall()
+        users = conn.execute('SELECT user_id FROM users').fetchall()
         conn.close()
 
         count = 0
-        for (cid,) in channels:
+        for (uid,) in users:
             try:
-                await message.copy_to(chat_id=cid, reply_markup=kb)
+                await message.copy_to(chat_id=uid, reply_markup=kb)
                 count += 1
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.05) # Tezlikni biroz oshirdik
             except: continue
             
-        await status_msg.edit_text(f"✅ Post {count} ta kanalga tarqatildi!")
+        await status_msg.edit_text(f"✅ Post {count} ta foydalanuvchiga tarqatildi!")
         admin_states[message.from_user.id] = None
 
-    # 2. Kanal qo'shish va adminlikni tekshirish
-    elif message.text and (message.text.startswith("@") or "t.me/" in message.text):
-        link = message.text.strip().split('/')[-1]
-        if not link.startswith("@"): link = f"@{link}"
+    # 2. Kanal linkini qabul qilish (t.me va @ uchun)
+    elif message.text and ("t.me/" in message.text or message.text.startswith("@")):
+        # Linkni tozalash va username ni ajratib olish
+        raw_text = message.text.strip()
+        if "t.me/" in raw_text:
+            link = raw_text.split('/')[-1].split('?')[0] # t.me/username/123 yoki t.me/username?start bo'lsa ham ishlaydi
+        else:
+            link = raw_text.replace("@", "")
         
-        # Botni admin qilish uchun maxsus havola
+        username = f"@{link}"
+        
         me = await bot.get_me()
         admin_link = f"https://t.me/{me.username}?startchannel=true&admin=post_messages+edit_messages+delete_messages"
 
@@ -143,35 +150,52 @@ async def handle_admin_input(message: types.Message):
             [InlineKeyboardButton(text="➕ Botni kanalga admin qilish", url=admin_link)],
             [InlineKeyboardButton(text="✅ Admin qildim (Tekshirish)", callback_data=f"v_{link}")]
         ])
-        await message.answer(f"Kanal: **{link}**\n\n1. Botni admin qiling.\n2. Tekshirish tugmasini bosing.", reply_markup=kb, parse_mode="Markdown")
+        
+        # HTML rejimida Markdown xatolaridan qutulamiz
+        await message.answer(
+            f"Kanal: <b>{username}</b>\n\n1. Botni kanalga admin qiling.\n2. Tekshirish tugmasini bosing.", 
+            reply_markup=kb, 
+            parse_mode=ParseMode.HTML
+        )
 
 @dp.callback_query(F.data.startswith("v_"))
 async def verify_channel(callback: types.CallbackQuery):
     link = callback.data.split('_')[1]
     try:
-        chat = await bot.get_chat(link)
-        # Haqiqatda adminmi yoki yo'qligini tekshirish
-        bot_id = (await bot.get_me()).id
-        member = await bot.get_chat_member(chat_id=chat.id, user_id=bot_id)
+        chat = await bot.get_chat(f"@{link}")
+        bot_member = await bot.get_chat_member(chat_id=chat.id, user_id=(await bot.get_me()).id)
         
-        if member.status in ["administrator", "creator"]:
+        if bot_member.status in ["administrator", "creator"]:
             conn = sqlite3.connect('konkurs_bot.db')
-            conn.execute('INSERT OR IGNORE INTO channels VALUES (?, ?, ?)', (chat.id, chat.title, link))
+            conn.execute('INSERT OR IGNORE INTO channels VALUES (?, ?, ?)', (chat.id, chat.title, f"@{link}"))
             conn.commit()
             conn.close()
-            await callback.message.edit_text(f"✅ **{chat.title}** muvaffaqiyatli qo'shildi!")
+            await callback.message.edit_text(f"✅ <b>{chat.title}</b> muvaffaqiyatli qo'shildi!", parse_mode=ParseMode.HTML)
         else:
             await callback.answer("❌ Bot hali bu kanalda admin emas!", show_alert=True)
-    except:
-        await callback.answer("❌ Xato: Bot kanalda yo'q yoki link noto'g'ri.", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"❌ Xato: Bot kanalda yo'q yoki havola noto'g'ri.", show_alert=True)
 
 async def main():
     init_db()
     logging.basicConfig(level=logging.INFO)
+    
+    # 1. Web serverni ishga tushirish (Render uchun)
+    await start_web_server()
+    
+    # 2. Botlarni ishga tushirish
+    if not user_bot.is_connected: 
+        await user_bot.start()
+        
     await bot.delete_webhook(drop_pending_updates=True)
-    if not user_bot.is_connected: await user_bot.start()
-    print("Bot xatolarsiz ishga tushdi!")
-    await dp.start_polling(bot)
+    print("Bot va UserBot muvaffaqiyatli ishga tushdi!")
+    
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+        if user_bot.is_connected:
+            await user_bot.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
