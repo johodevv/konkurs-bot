@@ -106,32 +106,51 @@ async def start_ads_handler(callback: types.CallbackQuery):
 
 @dp.message(F.from_user.id == ADMIN_ID)
 async def handle_admin_input(message: types.Message):
-    # 1. Reklama tarqatish
+    # 1. Reklama tarqatish (Kanallarga tarqatish)
     if admin_states.get(message.from_user.id) == "waiting_post":
-        status_msg = await message.answer("⏳ Jild havolasi olinmoqda...")
-        url = await get_folder_link()
+        status_msg = await message.answer("⏳ Jild havolasi olinmoqda va kanallarga tarqatilmoqda...")
         
+        # Jild havolasini olish
+        url = await get_folder_link()
         if not url:
             await status_msg.edit_text("❌ Xato: Jild yaratish uchun kanallar yetarli emas.")
             return
 
+        # Jild tugmasini yaratish
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📂 Jildga qo'shilish", url=url)]])
         
+        # Bazadan barcha qo'shilgan kanallarni olish
         conn = sqlite3.connect('konkurs_bot.db')
-        users = conn.execute('SELECT user_id FROM users').fetchall()
+        channels = conn.execute('SELECT chat_id FROM channels').fetchall()
         conn.close()
 
         count = 0
-        for (uid,) in users:
+        error_count = 0
+        
+        for (cid,) in channels:
             try:
-                await message.copy_to(chat_id=uid, reply_markup=kb)
+                # Bot bu kanalda admin bo'lgani uchun bot nomidan yuboramiz
+                # Agar kanalda bot admin bo'lmasa, xatolik beradi
+                await bot.copy_message(
+                    chat_id=cid, 
+                    from_chat_id=message.chat.id, 
+                    message_id=message.message_id,
+                    reply_markup=kb
+                )
                 count += 1
-                await asyncio.sleep(0.05) # Tezlikni biroz oshirdik
-            except: continue
+                await asyncio.sleep(0.5) # Telegram limitlariga tushmaslik uchun
+            except Exception as e:
+                logging.error(f"Kanalga yuborishda xato ({cid}): {e}")
+                error_count += 1
+                continue
             
-        await status_msg.edit_text(f"✅ Post {count} ta foydalanuvchiga tarqatildi!")
+        await status_msg.edit_text(
+            f"✅ Reklama yakunlandi!\n\n"
+            f"📢 Muvaffaqiyatli: <b>{count}</b> ta kanal\n"
+            f"❌ Xatolik: <b>{error_count}</b> ta kanal (bot admin emas yoki bloklangan)",
+            parse_mode=ParseMode.HTML
+        )
         admin_states[message.from_user.id] = None
-
     # 2. Kanal linkini qabul qilish (t.me va @ uchun)
     elif message.text and ("t.me/" in message.text or message.text.startswith("@")):
         # Linkni tozalash va username ni ajratib olish
