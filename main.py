@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sqlite3
 import logging
 from aiogram import Bot, Dispatcher, types, F
@@ -152,3 +153,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+PORT = int(os.environ.get("PORT", 5000))
