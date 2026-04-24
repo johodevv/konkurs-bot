@@ -15,7 +15,7 @@ BOT_TOKEN = "8589756374:AAGsylGrZ8hQxHg9GIo6P3ptInruTd_pMpg"
 API_ID = 28466899
 API_HASH = "2f1948ccca564e8973e8cf9c3204d2e9"
 SESSION_STRING = "AgGyXtMABg1dy66Kd9DjaNIUSds6CTQomsUhCmXVn0-fseieC4qzyP2Oq5EVAPrqsP-F7ws3ZkE4bpXbPYNZ-09jL31iMYZZhIPSfPjRSJd_k9xQrClvjsttXLcwelTLA7csRH9sPVER8ACTIgozIyTZzO891s4sVt5KhQKuPI4wSaF8YmtB_84n844SH_senWKCVDN92peoAFy39W263sVSUzOg8-Jg8UEmD8KhmN9RWtOnyKOqueNSJiDzyG1ae793emljY8jxNM3_4dEqkimzi5OahguB8QZ4yIzuPyM04mV_MqjQv_sq-XOsQ3zuKYZwgqZ95PNen1paIL3B527h0OwaAAAAAAH2gY3GAA"
-ADMIN_ID = 8430652870
+ADMIN_ID = 8430652870 # Faqat shu ID reklama tarqata oladi
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -23,7 +23,7 @@ user_bot = Client("my_account", api_id=API_ID, api_hash=API_HASH, session_string
 
 admin_states = {}
 
-# --- RENDER PORTINI BAND QILISH (O'CHIB QOLMASLIGI UCHUN) ---
+# --- RENDER UCHUN WEB SERVER ---
 async def handle(request):
     return web.Response(text="Bot is running!")
 
@@ -32,13 +32,11 @@ async def start_web_server():
     app.router.add_get('/', handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    # Render avtomatik beradigan PORT yoki 10000-portda ishlaydi
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"Web server {port}-portda ishga tushdi.")
 
-# --- BAZA BILAN ISHLASH ---
+# --- BAZA ---
 def init_db():
     conn = sqlite3.connect('konkurs_bot.db')
     conn.execute('CREATE TABLE IF NOT EXISTS channels (chat_id INTEGER PRIMARY KEY, title TEXT, link TEXT)')
@@ -81,7 +79,7 @@ async def start_cmd(message: types.Message):
     conn.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.from_user.id,))
     conn.commit()
     conn.close()
-    await message.answer("👋 Salom! Botga xush kelibsiz.\nKanal linkini yuboring yoki admin paneldan foydalaning.")
+    await message.answer("👋 Salom! Botga xush kelibsiz.\nKanal linkini yuboring (masalan: @kanal yoki t.me/kanal)")
 
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
@@ -90,78 +88,53 @@ async def admin_panel(message: types.Message):
         user_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
         channel_count = conn.execute('SELECT COUNT(*) FROM channels').fetchone()[0]
         conn.close()
-
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Reklama Tarqatish", callback_data="start_ads")],
-            [InlineKeyboardButton(text="🔄 Statistikani yangilash", callback_data="refresh_stats")]
+            [InlineKeyboardButton(text="🚀 Reklama Tarqatish", callback_data="start_ads")]
         ])
-        
-        text = f"📊 <b>Statistika</b>\n\n👤 Userlar: <code>{user_count}</code>\n📢 Kanallar: <code>{channel_count}</code>"
-        await message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
+        await message.answer(f"📊 <b>Statistika</b>\n\n👤 Userlar: {user_count}\n📢 Kanallar: {channel_count}", reply_markup=kb, parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "start_ads")
 async def start_ads_handler(callback: types.CallbackQuery):
-    admin_states[callback.from_user.id] = "waiting_post"
-    await callback.message.edit_text("📝 Menga reklama postini yuboring. Bot uning ostiga avtomatik jild tugmasini qo'shadi.")
+    if callback.from_user.id == ADMIN_ID:
+        admin_states[callback.from_user.id] = "waiting_post"
+        await callback.message.edit_text("📝 Menga reklama postini yuboring. Bot uni kanallarga tarqatadi.")
 
-@dp.message(F.from_user.id == ADMIN_ID)
-async def handle_admin_input(message: types.Message):
-    # 1. Reklama tarqatish (Kanallarga tarqatish)
-    if admin_states.get(message.from_user.id) == "waiting_post":
-        status_msg = await message.answer("⏳ Jild havolasi olinmoqda va kanallarga tarqatilmoqda...")
-        
-        # Jild havolasini olish
+@dp.message()
+async def handle_all_messages(message: types.Message):
+    # 1. Admin uchun reklama tarqatish jarayoni
+    if message.from_user.id == ADMIN_ID and admin_states.get(message.from_user.id) == "waiting_post":
+        status_msg = await message.answer("⏳ Jild havolasi olinmoqda va tarqatilmoqda...")
         url = await get_folder_link()
         if not url:
             await status_msg.edit_text("❌ Xato: Jild yaratish uchun kanallar yetarli emas.")
             return
 
-        # Jild tugmasini yaratish
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📂 Jildga qo'shilish", url=url)]])
-        
-        # Bazadan barcha qo'shilgan kanallarni olish
         conn = sqlite3.connect('konkurs_bot.db')
         channels = conn.execute('SELECT chat_id FROM channels').fetchall()
         conn.close()
 
         count = 0
-        error_count = 0
-        
         for (cid,) in channels:
             try:
-                # Bot bu kanalda admin bo'lgani uchun bot nomidan yuboramiz
-                # Agar kanalda bot admin bo'lmasa, xatolik beradi
-                await bot.copy_message(
-                    chat_id=cid, 
-                    from_chat_id=message.chat.id, 
-                    message_id=message.message_id,
-                    reply_markup=kb
-                )
+                await bot.copy_message(chat_id=cid, from_chat_id=message.chat.id, message_id=message.message_id, reply_markup=kb)
                 count += 1
-                await asyncio.sleep(0.5) # Telegram limitlariga tushmaslik uchun
-            except Exception as e:
-                logging.error(f"Kanalga yuborishda xato ({cid}): {e}")
-                error_count += 1
-                continue
-            
-        await status_msg.edit_text(
-            f"✅ Reklama yakunlandi!\n\n"
-            f"📢 Muvaffaqiyatli: <b>{count}</b> ta kanal\n"
-            f"❌ Xatolik: <b>{error_count}</b> ta kanal (bot admin emas yoki bloklangan)",
-            parse_mode=ParseMode.HTML
-        )
+                await asyncio.sleep(0.5)
+            except: continue
+        
+        await status_msg.edit_text(f"✅ Reklama {count} ta kanalga muvaffaqiyatli tarqatildi!")
         admin_states[message.from_user.id] = None
-    # 2. Kanal linkini qabul qilish (t.me va @ uchun)
-    elif message.text and ("t.me/" in message.text or message.text.startswith("@")):
-        # Linkni tozalash va username ni ajratib olish
+        return
+
+    # 2. Hamma foydalanuvchilar uchun kanal qo'shish qismi
+    if message.text and ("t.me/" in message.text or message.text.startswith("@")):
         raw_text = message.text.strip()
         if "t.me/" in raw_text:
-            link = raw_text.split('/')[-1].split('?')[0] # t.me/username/123 yoki t.me/username?start bo'lsa ham ishlaydi
+            link = raw_text.split('/')[-1].split('?')[0]
         else:
             link = raw_text.replace("@", "")
         
         username = f"@{link}"
-        
         me = await bot.get_me()
         admin_link = f"https://t.me/{me.username}?startchannel=true&admin=post_messages+edit_messages+delete_messages"
 
@@ -169,13 +142,7 @@ async def handle_admin_input(message: types.Message):
             [InlineKeyboardButton(text="➕ Botni kanalga admin qilish", url=admin_link)],
             [InlineKeyboardButton(text="✅ Admin qildim (Tekshirish)", callback_data=f"v_{link}")]
         ])
-        
-        # HTML rejimida Markdown xatolaridan qutulamiz
-        await message.answer(
-            f"Kanal: <b>{username}</b>\n\n1. Botni kanalga admin qiling.\n2. Tekshirish tugmasini bosing.", 
-            reply_markup=kb, 
-            parse_mode=ParseMode.HTML
-        )
+        await message.answer(f"Kanal: <b>{username}</b>\n\n1. Botni admin qiling.\n2. Tekshirish tugmasini bosing.", reply_markup=kb, parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data.startswith("v_"))
 async def verify_channel(callback: types.CallbackQuery):
@@ -183,7 +150,6 @@ async def verify_channel(callback: types.CallbackQuery):
     try:
         chat = await bot.get_chat(f"@{link}")
         bot_member = await bot.get_chat_member(chat_id=chat.id, user_id=(await bot.get_me()).id)
-        
         if bot_member.status in ["administrator", "creator"]:
             conn = sqlite3.connect('konkurs_bot.db')
             conn.execute('INSERT OR IGNORE INTO channels VALUES (?, ?, ?)', (chat.id, chat.title, f"@{link}"))
@@ -192,29 +158,17 @@ async def verify_channel(callback: types.CallbackQuery):
             await callback.message.edit_text(f"✅ <b>{chat.title}</b> muvaffaqiyatli qo'shildi!", parse_mode=ParseMode.HTML)
         else:
             await callback.answer("❌ Bot hali bu kanalda admin emas!", show_alert=True)
-    except Exception as e:
-        await callback.answer(f"❌ Xato: Bot kanalda yo'q yoki havola noto'g'ri.", show_alert=True)
+    except:
+        await callback.answer("❌ Xato: Bot kanalda yo'q yoki havola noto'g'ri.", show_alert=True)
 
 async def main():
     init_db()
     logging.basicConfig(level=logging.INFO)
-    
-    # 1. Web serverni ishga tushirish (Render uchun)
     await start_web_server()
-    
-    # 2. Botlarni ishga tushirish
-    if not user_bot.is_connected: 
-        await user_bot.start()
-        
+    if not user_bot.is_connected: await user_bot.start()
     await bot.delete_webhook(drop_pending_updates=True)
-    print("Bot va UserBot muvaffaqiyatli ishga tushdi!")
-    
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
-        if user_bot.is_connected:
-            await user_bot.stop()
+    print("Bot ishga tushdi!")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
