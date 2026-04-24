@@ -6,6 +6,24 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client
 from pyrogram.raw import functions, types as raw_types
+from aiohttp import web
+
+# Render uchun kichik port ochib berish
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000) # Render kutadigan port
+    await site.start()
+
+# main() funksiyang ichiga:
+async def main():
+    await start_web_server() # Buni qo'shish kerak
+    # ... qolgan bot kodlari
 
 # --- SOZMALAR ---
 BOT_TOKEN = "8589756374:AAGsylGrZ8hQxHg9GIo6P3ptInruTd_pMpg"
