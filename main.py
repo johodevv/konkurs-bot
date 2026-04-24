@@ -14,8 +14,10 @@ API_HASH = "2f1948ccca564e8973e8cf9c3204d2e9"
 SESSION_STRING = "AgGyXtMABg1dy66Kd9DjaNIUSds6CTQomsUhCmXVn0-fseieC4qzyP2Oq5EVAPrqsP-F7ws3ZkE4bpXbPYNZ-09jL31iMYZZhIPSfPjRSJd_k9xQrClvjsttXLcwelTLA7csRH9sPVER8ACTIgozIyTZzO891s4sVt5KhQKuPI4wSaF8YmtB_84n844SH_senWKCVDN92peoAFy39W263sVSUzOg8-Jg8UEmD8KhmN9RWtOnyKOqueNSJiDzyG1ae793emljY8jxNM3_4dEqkimzi5OahguB8QZ4yIzuPyM04mV_MqjQv_sq-XOsQ3zuKYZwgqZ95PNen1paIL3B527h0OwaAAAAAAH2gY3GAA"
 ADMIN_ID = 8430652870
 
-# --- SENI KANALLARING ---
+# --- MAJBURIY OBUNA ---
 REQUIRED_CHANNELS = ["@ortiqboyovichch", "@jildgaqoshil"] 
+# Konkurs rasmi (Siz yuborgan 6 oylik Premium rasmi)
+PREMIUM_IMAGE = "https://clm.sh/s/167b0b72-f851-4043-8557-01004a806954"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -24,31 +26,24 @@ user_bot = Client("my_account", api_id=API_ID, api_hash=API_HASH, session_string
 # --- BAZA ---
 def init_db():
     conn = sqlite3.connect('konkurs_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('CREATE TABLE IF NOT EXISTS channels (chat_id INTEGER PRIMARY KEY, title TEXT, link TEXT)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)')
+    conn.execute('CREATE TABLE IF NOT EXISTS channels (chat_id INTEGER PRIMARY KEY, title TEXT, link TEXT)')
+    conn.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)')
     conn.commit()
     conn.close()
 
-# --- OBUNANI TEKSHIRISH ---
 async def check_sub(user_id):
     for channel in REQUIRED_CHANNELS:
         try:
             member = await bot.get_chat_member(channel, user_id)
-            if member.status in ["left", "kicked"]:
-                return False
-        except Exception as e:
-            logging.error(f"Tekshirishda xato: {e}")
-            return False
+            if member.status in ["left", "kicked"]: return False
+        except: return False
     return True
 
-# --- JILDNI YANGILASH ---
 async def refresh_folder_and_get_link():
     conn = sqlite3.connect('konkurs_bot.db')
     rows = conn.execute('SELECT chat_id, link FROM channels').fetchall()
     conn.close()
     if not rows: return None
-
     peers = []
     if not user_bot.is_connected: await user_bot.start()
     for cid, link in rows:
@@ -56,7 +51,6 @@ async def refresh_folder_and_get_link():
             chat = await user_bot.get_chat(link if link.startswith("@") else cid)
             peers.append(await user_bot.resolve_peer(chat.id))
         except: continue
-
     if not peers: return None
     folder_id = 200
     try:
@@ -72,25 +66,24 @@ async def refresh_folder_and_get_link():
 async def start_handler(message: types.Message):
     if not await check_sub(message.from_user.id):
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Kanalga a'zo bo'lish", url="https://t.me/ortiqboyovichch")],
-            [InlineKeyboardButton(text="💬 Guruhga qo'shilish", url="https://t.me/jildgaqoshil")],
-            [InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")]
+            [InlineKeyboardButton(text="📢 Rasmiy kanal", url="https://t.me/ortiqboyovichch")],
+            [InlineKeyboardButton(text="💬 Muhokama guruhi", url="https://t.me/jildgaqoshil")],
+            [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
         ])
-        await message.answer("⚠️ Botdan foydalanish uchun kanallarga a'zo bo'lishingiz shart!", reply_markup=kb)
+        await message.answer("👋 **Xush kelibsiz!**\n\nBotdan foydalanish va konkursda ishtirok etish uchun quyidagi kanallarga obuna bo'lishingiz lozim. 👇", reply_markup=kb, parse_mode="Markdown")
         return
-
     conn = sqlite3.connect('konkurs_bot.db')
     conn.execute('INSERT OR IGNORE INTO users VALUES (?)', (message.from_user.id,))
     conn.commit()
     conn.close()
-    await message.answer("✅ Obuna tasdiqlandi! Endi kanal linkini yuboring (Masalan: @username)")
+    await message.answer("🎉 **Tabriklaymiz!** Siz muvaffaqiyatli ro'yxatdan o'tdingiz.\n\nEndi o'z kanalingizni konkurs jildiga qo'shish uchun kanal linkini yuboring (Masalan: `@username`)", parse_mode="Markdown")
 
 @dp.callback_query(F.data == "check_sub")
 async def check_callback(callback: types.CallbackQuery):
     if await check_sub(callback.from_user.id):
-        await callback.message.edit_text("🎉 Rahmat! Endi kanal linkini yuboring:")
+        await callback.message.edit_text("🎉 **Rahmat!** Endi botdan to'liq foydalanishingiz mumkin.\nKanal linkini yuboring:")
     else:
-        await callback.answer("❌ Hali a'zo bo'lmadingiz!", show_alert=True)
+        await callback.answer("❌ Hali obuna bo'lmagansiz!", show_alert=True)
 
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
@@ -99,32 +92,33 @@ async def admin_panel(message: types.Message):
         u_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
         c_count = conn.execute('SELECT COUNT(*) FROM channels').fetchone()[0]
         conn.close()
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📢 Konkursni kanallarga tarqatish", callback_data="broadcast")]])
-        await message.answer(f"📊 Statistika\n\nUserlar: {u_count}\nKanallar: {c_count}", reply_markup=kb)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚀 Konkursni tarqatish", callback_data="broadcast")]])
+        await message.answer(f"📊 **Statistika**\n\n👤 Foydalanuvchilar: {u_count}\n📢 Kanallar: {c_count}", reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "broadcast")
 async def broadcast_handler(callback: types.CallbackQuery):
-    await callback.message.edit_text("⏳ Jild yangilanmoqda...")
+    await callback.message.edit_text("⏳ **Jild yangilanmoqda, kuting...**")
     url = await refresh_folder_and_get_link()
     if not url:
-        await callback.message.answer("❌ Xato: Kanallar topilmadi yoki jild yaratilmadi.")
+        await callback.message.answer("❌ Xato: Jild linkini yaratib bo'lmadi.")
         return
-
-    text = "🎁 **DIQQAT KONKURS!**\n\nPastdagi jildga obuna bo'ling!"
+    text = (
+        "💎 **TELEGRAM PREMIUM KONKURSI!**\n\n"
+        "Pastdagi tugma orqali jildga qo'shiling va 6 oylik **Telegram Premium** yutib olish imkoniyatini qo'lga kiriting! 🎁\n\n"
+        "✅ **Shartlar juda oddiy:** Shunchaki jildga a'zo bo'ling!"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📂 Jildga qo'shilish", url=url)]])
-
     conn = sqlite3.connect('konkurs_bot.db')
     channels = conn.execute('SELECT chat_id FROM channels').fetchall()
     conn.close()
-
     success = 0
     for (cid,) in channels:
         try:
-            await bot.send_message(cid, text, reply_markup=kb, parse_mode="Markdown")
+            await bot.send_photo(chat_id=cid, photo=PREMIUM_IMAGE, caption=text, reply_markup=kb, parse_mode="Markdown")
             success += 1
             await asyncio.sleep(0.5)
         except: continue
-    await callback.message.answer(f"✅ Xabar {success} ta kanalga yuborildi!")
+    await callback.message.answer(f"✅ Konkurs {success} ta kanalga rasm bilan yuborildi!")
 
 @dp.message(F.text.startswith("@") | F.text.contains("t.me/"))
 async def handle_link(message: types.Message):
@@ -132,7 +126,7 @@ async def handle_link(message: types.Message):
     link = message.text.strip().split('/')[-1]
     if not link.startswith("@"): link = f"@{link}"
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Admin qildim", callback_data=f"v_{link}")]])
-    await message.answer(f"Botni {link} kanaliga admin qiling va tugmani bosing 👇", reply_markup=kb)
+    await message.answer(f"Botni {link} kanaliga **admin** qiling va pastdagi tugmani bosing 👇", reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("v_"))
 async def verify_handler(callback: types.CallbackQuery):
@@ -145,17 +139,16 @@ async def verify_handler(callback: types.CallbackQuery):
             conn.execute('INSERT OR IGNORE INTO channels VALUES (?, ?, ?)', (chat.id, chat.title, link))
             conn.commit()
             conn.close()
-            await callback.message.edit_text(f"✅ {chat.title} qo'shildi!")
+            await callback.message.edit_text(f"✅ **{chat.title}** muvaffaqiyatli qo'shildi!")
         else:
             await callback.answer("❌ Bot hali admin emas!", show_alert=True)
-    except:
-        await callback.answer("❌ Xato yuz berdi.", show_alert=True)
+    except: await callback.answer("❌ Xatolik! Linkni tekshiring.", show_alert=True)
 
 async def main():
     init_db()
     logging.basicConfig(level=logging.INFO)
     await user_bot.start()
-    print("Botlar ishlamoqda...")
+    print("Botlar uyg'ondi...")
     try:
         await dp.start_polling(bot)
     finally:
