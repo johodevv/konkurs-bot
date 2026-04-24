@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client
 from pyrogram.raw import functions, types as raw_types
 
-# --- SOZLAMALAR ---
+# --- SOZMALAR ---
 BOT_TOKEN = "8589756374:AAGsylGrZ8hQxHg9GIo6P3ptInruTd_pMpg"
 API_ID = 28466899
 API_HASH = "2f1948ccca564e8973e8cf9c3204d2e9"
@@ -18,7 +18,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_bot = Client("my_account", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
-# Admin reklama kutish holati
 admin_states = {}
 
 def init_db():
@@ -41,12 +40,10 @@ async def get_folder_link():
             try: chat = await user_bot.get_chat(link)
             except: chat = await user_bot.join_chat(link)
             peers.append(await user_bot.resolve_peer(chat.id))
-        except Exception as e:
-            logging.error(f"Kanal qo'shishda xato ({link}): {e}")
-            continue
+        except: continue
             
     if not peers: return None
-    folder_id = 200 # Ixtiyoriy ID
+    folder_id = 200
     try:
         await user_bot.invoke(functions.messages.UpdateDialogFilter(
             id=folder_id, 
@@ -56,13 +53,10 @@ async def get_folder_link():
         if invites.invites: return invites.invites[0].url
         invite = await user_bot.invoke(functions.chatlists.ExportChatlistInvite(chatlist=raw_types.InputChatlistDialogFilter(filter_id=folder_id), title="Konkurs", peers=peers))
         return invite.url
-    except Exception as e:
-        logging.error(f"Jild yaratishda xato: {e}")
-        return None
+    except: return None
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
-    # Foydalanuvchini bazaga qo'shish
     conn = sqlite3.connect('konkurs_bot.db')
     conn.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.from_user.id,))
     conn.commit()
@@ -88,7 +82,7 @@ async def admin_panel(message: types.Message):
 @dp.callback_query(F.data == "start_ads")
 async def start_ads_handler(callback: types.CallbackQuery):
     admin_states[callback.from_user.id] = "waiting_post"
-    await callback.message.edit_text("📝 Menga reklama postini yuboring.\n(Rasm, video yoki matn - hammasi o'tadi). Bot uning ostiga avtomatik jild tugmasini qo'shadi.")
+    await callback.message.edit_text("📝 Menga reklama postini yuboring. Bot uning ostiga avtomatik jild tugmasini qo'shadi.")
 
 @dp.message(F.from_user.id == ADMIN_ID)
 async def handle_admin_input(message: types.Message):
@@ -98,7 +92,7 @@ async def handle_admin_input(message: types.Message):
         url = await get_folder_link()
         
         if not url:
-            await status_msg.edit_text("❌ Xato: Jild yaratish uchun kanallar yetarli emas yoki UserBotda muammo bor.")
+            await status_msg.edit_text("❌ Xato: Jild yaratish uchun kanallar yetarli emas.")
             return
 
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📂 Jildga qo'shilish", url=url)]])
@@ -115,35 +109,50 @@ async def handle_admin_input(message: types.Message):
                 await asyncio.sleep(0.3)
             except: continue
             
-        await status_msg.edit_text(f"✅ Post {count} ta kanalga muvaffaqiyatli tarqatildi!")
+        await status_msg.edit_text(f"✅ Post {count} ta kanalga tarqatildi!")
         admin_states[message.from_user.id] = None
 
-    # 2. Kanal qo'shish holati
+    # 2. Kanal qo'shish va adminlikni tekshirish
     elif message.text and (message.text.startswith("@") or "t.me/" in message.text):
         link = message.text.strip().split('/')[-1]
         if not link.startswith("@"): link = f"@{link}"
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Admin qildim", callback_data=f"v_{link}")]])
-        await message.answer(f"Botni {link} kanaliga admin qiling va tugmani bosing.", reply_markup=kb)
+        
+        # Botni admin qilish uchun maxsus havola
+        me = await bot.get_me()
+        admin_link = f"https://t.me/{me.username}?startchannel=true&admin=post_messages+edit_messages+delete_messages"
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Botni kanalga admin qilish", url=admin_link)],
+            [InlineKeyboardButton(text="✅ Admin qildim (Tekshirish)", callback_data=f"v_{link}")]
+        ])
+        await message.answer(f"Kanal: **{link}**\n\n1. Botni admin qiling.\n2. Tekshirish tugmasini bosing.", reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("v_"))
 async def verify_channel(callback: types.CallbackQuery):
     link = callback.data.split('_')[1]
     try:
         chat = await bot.get_chat(link)
-        conn = sqlite3.connect('konkurs_bot.db')
-        conn.execute('INSERT OR IGNORE INTO channels VALUES (?, ?, ?)', (chat.id, chat.title, link))
-        conn.commit()
-        conn.close()
-        await callback.message.edit_text(f"✅ **{chat.title}** bazaga qo'shildi!", parse_mode="Markdown")
+        # Haqiqatda adminmi yoki yo'qligini tekshirish
+        bot_id = (await bot.get_me()).id
+        member = await bot.get_chat_member(chat_id=chat.id, user_id=bot_id)
+        
+        if member.status in ["administrator", "creator"]:
+            conn = sqlite3.connect('konkurs_bot.db')
+            conn.execute('INSERT OR IGNORE INTO channels VALUES (?, ?, ?)', (chat.id, chat.title, link))
+            conn.commit()
+            conn.close()
+            await callback.message.edit_text(f"✅ **{chat.title}** muvaffaqiyatli qo'shildi!")
+        else:
+            await callback.answer("❌ Bot hali bu kanalda admin emas!", show_alert=True)
     except:
-        await callback.answer("Bot hali admin emas!", show_alert=True)
+        await callback.answer("❌ Xato: Bot kanalda yo'q yoki link noto'g'ri.", show_alert=True)
 
 async def main():
     init_db()
     logging.basicConfig(level=logging.INFO)
     await bot.delete_webhook(drop_pending_updates=True)
     if not user_bot.is_connected: await user_bot.start()
-    print("Bot kompyuterda ishga tushdi...")
+    print("Bot xatolarsiz ishga tushdi!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
